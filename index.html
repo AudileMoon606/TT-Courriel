@@ -83,10 +83,7 @@
       cursor: pointer;
     }
     #controls button { background-color: #ffc107; color: #333; }
-    #controls select {
-      background-color: white;
-      color: #333;
-    }
+    #controls select { background-color: white; color: #333; }
     #statusBar { margin-left: 20px; font-weight: bold; }
     #progressBar {
       width: 100px;
@@ -228,12 +225,12 @@
   <input type="file" id="folderInput" webkitdirectory multiple style="display:none">
   <input type="file" id="fileInput" multiple accept=".msg" style="display:none">
 
-  <!-- Chargement de la bibliothèque msgreader (version 1.0.1) -->
+  <!-- Charger la bibliothèque msgreader -->
   <script src="https://cdn.jsdelivr.net/npm/msgreader@1.0.1/msgreader.min.js"></script>
 
   <!-- Script principal -->
   <script>
-    /* --- Gestion de la connexion --- */
+    // Gestion de la connexion
     function login() {
       var password = document.getElementById("password").value;
       if (password === "Alim7420") {
@@ -248,11 +245,11 @@
       }
     }
 
-    /* --- Variables Globales --- */
+    // Variables Globales
     var emailsByClient = {}; // Regroupement des courriels par expéditeur
     var currentFontSize = 14;
 
-    /* --- Mise à jour du statut et de la progression --- */
+    // Mise à jour du statut et de la progression
     function updateStatus(text) {
       document.getElementById("statusBar").textContent = text;
     }
@@ -260,7 +257,7 @@
       document.querySelector("#progressBar div").style.width = percent + "%";
     }
 
-    /* --- Chargement et traitement des fichiers .msg réels --- */
+    // Chargement et traitement des fichiers .msg
     function loadEmails(files) {
       if (!files || files.length === 0) return;
       updateStatus("Chargement...");
@@ -269,7 +266,7 @@
       var total = files.length;
       var processed = 0;
 
-      // Traitement de tous les fichiers en parallèle avec Promise.all
+      // Traitement des fichiers en parallèle
       var promises = Array.from(files).map(function(file) {
         return new Promise(function(resolve) {
           var reader = new FileReader();
@@ -303,7 +300,7 @@
       });
     }
 
-    /* --- Affichage des clients et des courriels --- */
+    // Affichage des clients et des courriels
     function populateClients() {
       var clientUl = document.getElementById("clientUl");
       clientUl.innerHTML = "";
@@ -313,14 +310,12 @@
         li.onclick = function() { populateEmails(client); };
         clientUl.appendChild(li);
       });
-      // Réinitialisation de la table des courriels
       document.querySelector("#emailTable tbody").innerHTML = "";
     }
 
     function populateEmails(client) {
       var tbody = document.querySelector("#emailTable tbody");
       tbody.innerHTML = "";
-      // Tri des courriels par sujet
       var emails = emailsByClient[client].sort(function(a, b) {
         return a.subject.localeCompare(b.subject);
       });
@@ -332,7 +327,7 @@
       });
     }
 
-    /* --- Affichage du contenu d'un courriel dans une fenêtre modale --- */
+    // Affichage du contenu d'un courriel dans une modale
     function openEmail(client, email) {
       document.getElementById("modalSubject").textContent = email.subject;
       document.getElementById("modalSender").textContent = "De : " + client;
@@ -340,7 +335,7 @@
       document.getElementById("emailModal").style.display = "block";
     }
 
-    /* --- Fermeture de la modale --- */
+    // Fermeture de la modale
     document.addEventListener("DOMContentLoaded", function() {
       var modal = document.getElementById("emailModal");
       var span = document.querySelector(".modal .close");
@@ -350,7 +345,7 @@
       };
     });
 
-    /* --- Sélection des fichiers --- */
+    // Sélection des fichiers
     function selectFolder() {
       document.getElementById("folderInput").click();
     }
@@ -366,7 +361,7 @@
       loadEmails(files);
     });
 
-    /* --- Gestion des thèmes et de la taille de police --- */
+    // Gestion des thèmes et de la taille de police
     function changeTheme() {
       var theme = document.getElementById("themeSelect").value;
       document.body.className = "theme-" + theme;
