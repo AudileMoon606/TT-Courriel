@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Organisateur de Courriels</title>
+  <style>
+    /* Réinitialisation */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      transition: background-color 0.3s, color 0.3s, font-size 0.3s;
+    }
+    /* Thèmes */
+    body.theme-yeti { background-color: #f7f7f7; color: #333; }
+    body.theme-cyborg { background-color: #2b2b2b; color: #ddd; }
+    body.theme-superhero { background-color: #fffbe6; color: #333; }
+    /* Page de connexion */
+    #loginOverlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 1s ease;
+    }
+    #loginOverlay.hidden { opacity: 0; pointer-events: none; }
+    #loginBox {
+      background: #fff;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      width: 300px;
+      text-align: center;
+    }
+    #loginBox h2 { margin-bottom: 20px; }
+    #loginBox input {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #loginBox button {
+      padding: 10px 20px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #loginBox button:hover { background-color: #0056b3; }
+    #loginBox p { margin-top: 10px; }
+    /* Application principale */
+    #app { display: none; flex-direction: column; height: 100vh; }
+    #header {
+      display: flex;
+      align-items: center;
+      padding: 10px 20px;
+      background-color: #007bff;
+      color: white;
+    }
+    #header img {
+      height: 50px;
+      margin-right: 15px;
+    }
+    #header h1 { font-size: 1.8em; }
+    #controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-left: auto;
+    }
+    #controls button, #controls select {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #controls button { background-color: #ffc107; color: #333; }
+    #controls select {
+      background-color: white;
+      color: #333;
+    }
+    #statusBar { margin-left: 20px; font-weight: bold; }
+    #progressBar {
+      width: 100px;
+      height: 10px;
+      background-color: #ccc;
+      border-radius: 5px;
+      overflow: hidden;
+      margin-left: 10px;
+    }
+    #progressBar div {
+      background-color: #28a745;
+      height: 100%;
+      width: 0%;
+      transition: width 0.5s;
+    }
+    /* Contenu principal */
+    #mainContent {
+      flex: 1;
+      display: flex;
+      padding: 20px;
+      gap: 20px;
+      overflow: hidden;
+    }
+    #clientList, #emailList {
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      overflow-y: auto;
+    }
+    #clientList { width: 30%; }
+    #emailList { width: 70%; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #ddd; text-align: left; }
+    tr:hover { background-color: #f1f1f1; cursor: pointer; }
+    h3 { margin-bottom: 10px; }
+    /* Liste clients */
+    #clientUl li {
+      padding: 8px;
+      border-bottom: 1px solid #ddd;
+      list-style: none;
+      cursor: pointer;
+    }
+    #clientUl li:hover { background-color: #f1f1f1; }
+    /* Modal d'affichage du courriel */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.7);
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: 10% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 80%;
+      max-width: 600px;
+      border-radius: 8px;
+      position: relative;
+    }
+    .close {
+      color: #aaa;
+      position: absolute;
+      top: 10px;
+      right: 20px;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .close:hover, .close:focus { color: black; }
+  </style>
+</head>
+<body class="theme-yeti">
+  <!-- Page de connexion -->
+  <div id="loginOverlay">
+    <div id="loginBox">
+      <h2>Connexion</h2>
+      <!-- Seul le mot de passe est requis -->
+      <input type="password" id="password" placeholder="Mot de passe">
+      <button onclick="login()">Se connecter</button>
+      <p id="loginError" style="color:red; display:none;">Mot de passe incorrect.</p>
+    </div>
+  </div>
+
+  <!-- Application principale -->
+  <div id="app">
+    <div id="header">
+      <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSn8j7-SXb8p7I8_p3zcqPpfI2plrpABlD4eGw73IYdUsjfdx4dsN2VrXGv4oc6ZTgtcyQ&usqp=CAU" alt="Logo">
+      <h1>Organisateur de Courriels</h1>
+      <div id="controls">
+        <button onclick="selectFolder()">Choisir Dossier</button>
+        <button onclick="selectEmails()">Choisir Courriels</button>
+        <select id="themeSelect" onchange="changeTheme()">
+          <option value="yeti">Yeti</option>
+          <option value="cyborg">Cyborg</option>
+          <option value="superhero">Superhero</option>
+        </select>
+        <button onclick="increaseFont()">Agrandir</button>
+        <button onclick="decreaseFont()">Réduire</button>
+        <span id="statusBar">Prêt</span>
+        <div id="progressBar"><div></div></div>
+      </div>
+    </div>
+    <div id="mainContent">
+      <div id="clientList">
+        <h3>Clients (Emails)</h3>
+        <ul id="clientUl"></ul>
+      </div>
+      <div id="emailList">
+        <h3>Courriels</h3>
+        <table id="emailTable">
+          <thead>
+            <tr>
+              <th>N°</th>
+              <th>Sujet</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal d'affichage d'un courriel -->
+  <div id="emailModal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h2 id="modalSubject"></h2>
+      <p id="modalSender"></p>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- Inputs cachés pour la sélection de fichiers -->
+  <input type="file" id="folderInput" webkitdirectory multiple style="display:none">
+  <input type="file" id="fileInput" multiple accept=".msg" style="display:none">
+
+  <!-- Chargement de la bibliothèque msgreader (version 1.0.1) -->
+  <script src="https://cdn.jsdelivr.net/npm/msgreader@1.0.1/msgreader.min.js"></script>
+
+  <!-- Script principal -->
+  <script>
+    /* --- Gestion de la connexion --- */
+    function login() {
+      var password = document.getElementById("password").value;
+      if (password === "Alim7420") {
+        var overlay = document.getElementById("loginOverlay");
+        overlay.classList.add("hidden");
+        setTimeout(function(){
+          overlay.style.display = "none";
+          document.getElementById("app").style.display = "flex";
+        }, 1000);
+      } else {
+        document.getElementById("loginError").style.display = "block";
+      }
+    }
+
+    /* --- Variables Globales --- */
+    var emailsByClient = {}; // Regroupement des courriels par expéditeur
+    var currentFontSize = 14;
+
+    /* --- Mise à jour du statut et de la progression --- */
+    function updateStatus(text) {
+      document.getElementById("statusBar").textContent = text;
+    }
+    function updateProgress(percent) {
+      document.querySelector("#progressBar div").style.width = percent + "%";
+    }
+
+    /* --- Chargement et traitement des fichiers .msg réels --- */
+    function loadEmails(files) {
+      if (!files || files.length === 0) return;
+      updateStatus("Chargement...");
+      updateProgress(0);
+      emailsByClient = {};
+      var total = files.length;
+      var processed = 0;
+
+      // Traitement de tous les fichiers en parallèle avec Promise.all
+      var promises = Array.from(files).map(function(file) {
+        return new Promise(function(resolve) {
+          var reader = new FileReader();
+          reader.onload = function(e) {
+            try {
+              var arrayBuffer = e.target.result;
+              // Créer une instance de MsgReader pour ce fichier
+              var msgReader = new MsgReader(arrayBuffer);
+              var msgData = msgReader.getFileData();
+              var senderEmail = msgData.senderEmail || "Inconnu";
+              var subject = msgData.subject || file.name.replace(/\.msg$/i, "");
+              var body = msgData.body || "Aucun contenu.";
+              if (!emailsByClient[senderEmail]) {
+                emailsByClient[senderEmail] = [];
+              }
+              emailsByClient[senderEmail].push({ subject: subject, body: body, fileName: file.name });
+            } catch (err) {
+              console.error("Erreur lors du traitement du fichier " + file.name + " : " + err);
+            }
+            processed++;
+            updateProgress((processed / total) * 100);
+            resolve();
+          };
+          reader.readAsArrayBuffer(file);
+        });
+      });
+
+      Promise.all(promises).then(function() {
+        updateStatus("Terminé");
+        populateClients();
+      });
+    }
+
+    /* --- Affichage des clients et des courriels --- */
+    function populateClients() {
+      var clientUl = document.getElementById("clientUl");
+      clientUl.innerHTML = "";
+      Object.keys(emailsByClient).sort().forEach(function(client) {
+        var li = document.createElement("li");
+        li.textContent = client;
+        li.onclick = function() { populateEmails(client); };
+        clientUl.appendChild(li);
+      });
+      // Réinitialisation de la table des courriels
+      document.querySelector("#emailTable tbody").innerHTML = "";
+    }
+
+    function populateEmails(client) {
+      var tbody = document.querySelector("#emailTable tbody");
+      tbody.innerHTML = "";
+      // Tri des courriels par sujet
+      var emails = emailsByClient[client].sort(function(a, b) {
+        return a.subject.localeCompare(b.subject);
+      });
+      emails.forEach(function(email, index) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + (index + 1) + "</td><td>" + email.subject + "</td>";
+        tr.ondblclick = function() { openEmail(client, email); };
+        tbody.appendChild(tr);
+      });
+    }
+
+    /* --- Affichage du contenu d'un courriel dans une fenêtre modale --- */
+    function openEmail(client, email) {
+      document.getElementById("modalSubject").textContent = email.subject;
+      document.getElementById("modalSender").textContent = "De : " + client;
+      document.getElementById("modalBody").innerHTML = email.body.replace(/\n/g, "<br>");
+      document.getElementById("emailModal").style.display = "block";
+    }
+
+    /* --- Fermeture de la modale --- */
+    document.addEventListener("DOMContentLoaded", function() {
+      var modal = document.getElementById("emailModal");
+      var span = document.querySelector(".modal .close");
+      span.onclick = function() { modal.style.display = "none"; };
+      window.onclick = function(event) {
+        if (event.target == modal) { modal.style.display = "none"; }
+      };
+    });
+
+    /* --- Sélection des fichiers --- */
+    function selectFolder() {
+      document.getElementById("folderInput").click();
+    }
+    function selectEmails() {
+      document.getElementById("fileInput").click();
+    }
+    document.getElementById("folderInput").addEventListener("change", function(event) {
+      var files = event.target.files;
+      loadEmails(files);
+    });
+    document.getElementById("fileInput").addEventListener("change", function(event) {
+      var files = event.target.files;
+      loadEmails(files);
+    });
+
+    /* --- Gestion des thèmes et de la taille de police --- */
+    function changeTheme() {
+      var theme = document.getElementById("themeSelect").value;
+      document.body.className = "theme-" + theme;
+    }
+    function increaseFont() {
+      currentFontSize += 2;
+      document.body.style.fontSize = currentFontSize + "px";
+    }
+    function decreaseFont() {
+      if (currentFontSize > 6) {
+        currentFontSize -= 2;
+        document.body.style.fontSize = currentFontSize + "px";
+      }
+    }
+  </script>
+</body>
+</html>
