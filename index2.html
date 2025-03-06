@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Organisateur de Courriels</title>
+  <!-- Utilisation de Bootstrap pour une interface moderne (similaire à ttkbootstrap) -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <style>
+    body { padding: 20px; }
+    .pointer { cursor: pointer; }
+    #clientPanel { border-right: 1px solid #ccc; }
+    #clientList { max-height: 500px; overflow-y: auto; }
+    #emailTable tbody tr:hover { background-color: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <!-- Panneau de contrôle -->
+    <div class="row mb-3">
+      <div class="col">
+        <button id="chooseFolder" class="btn btn-primary">Choisir Dossier</button>
+        <button id="chooseFiles" class="btn btn-primary">Choisir Courriels</button>
+      </div>
+      <div class="col text-right">
+        <span id="status">Prêt</span>
+      </div>
+    </div>
+    <!-- Interface Master-Detail -->
+    <div class="row">
+      <!-- Liste des clients -->
+      <div class="col-md-3" id="clientPanel">
+        <h5>Clients (Emails)</h5>
+        <ul class="list-group" id="clientList">
+          <!-- La liste des clients sera remplie ici -->
+        </ul>
+      </div>
+      <!-- Liste des courriels du client sélectionné -->
+      <div class="col-md-9" id="emailPanel">
+        <h5>Courriels</h5>
+        <table class="table table-hover" id="emailTable">
+          <thead>
+            <tr>
+              <th>N°</th>
+              <th>Sujet</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- La liste des emails sera remplie ici -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script JavaScript pour gérer l'interface -->
+  <script>
+    // Ces fonctions simulant le comportement de l'application.
+    // Dans une application réelle, les fichiers .msg seraient uploadés,
+    // traités côté serveur et les données retournées en JSON.
+
+    // Exemple de données simulées, regroupées par adresse de l'expéditeur.
+    const emailsByClient = {
+      "alice@example.com": [
+         { subject: "Réunion du lundi", path: "files/alice_msg1.msg" },
+         { subject: "Compte-rendu", path: "files/alice_msg2.msg" }
+      ],
+      "bob@example.com": [
+         { subject: "Projet X", path: "files/bob_msg1.msg" },
+         { subject: "Mise à jour", path: "files/bob_msg2.msg" },
+         { subject: "Questions", path: "files/bob_msg3.msg" }
+      ]
+    };
+
+    // Remplit la liste des clients dans l'interface
+    function populateClients() {
+      const clientList = document.getElementById("clientList");
+      clientList.innerHTML = "";
+      // On trie les clients par ordre alphabétique
+      const clients = Object.keys(emailsByClient).sort();
+      clients.forEach(client => {
+        const li = document.createElement("li");
+        li.className = "list-group-item pointer";
+        li.textContent = client;
+        li.addEventListener("click", () => {
+          populateEmails(client);
+        });
+        clientList.appendChild(li);
+      });
+    }
+
+    // Remplit la table des emails pour le client sélectionné
+    function populateEmails(client) {
+      const emailTableBody = document.querySelector("#emailTable tbody");
+      emailTableBody.innerHTML = "";
+      const emails = emailsByClient[client] || [];
+      emails.forEach((email, index) => {
+        const tr = document.createElement("tr");
+        tr.className = "pointer";
+        tr.innerHTML = `<td>${index + 1}</td><td>${email.subject}</td>`;
+        // Double-clic pour "ouvrir" l'email
+        tr.addEventListener("dblclick", () => {
+          openEmail(email);
+        });
+        emailTableBody.appendChild(tr);
+      });
+    }
+
+    // Simule l'ouverture du fichier .msg dans Outlook
+    // Dans un vrai scénario, on pourrait déclencher un téléchargement ou rediriger vers un service
+    function openEmail(email) {
+      // Ici, on simule l'ouverture en affichant une alerte.
+      // Pour ouvrir Outlook, il faudrait une intégration côté client/OS ou un protocole personnalisé.
+      alert("Ouverture du fichier: " + email.path);
+      // Par exemple, si Outlook est associé aux fichiers .msg, un clic sur un lien "mailto:" pourrait être utilisé.
+      // window.location.href = "mailto:" + email.sender; (mais cela n'ouvre pas le .msg directement)
+    }
+
+    // Gestion des boutons "Choisir Dossier" et "Choisir Courriels"
+    // Ces actions nécessitent une implémentation côté serveur pour accéder aux fichiers locaux
+    document.getElementById("chooseFolder").addEventListener("click", () => {
+      alert("Fonctionnalité à implémenter côté serveur : choisir un dossier et uploader les fichiers .msg.");
+      // Après upload, les données JSON avec les emails extraits seraient renvoyées et utilisées pour mettre à jour emailsByClient
+    });
+
+    document.getElementById("chooseFiles").addEventListener("click", () => {
+      alert("Fonctionnalité à implémenter côté serveur : choisir des fichiers .msg et les uploader.");
+    });
+
+    // Initialisation
+    populateClients();
+  </script>
+</body>
+</html>
