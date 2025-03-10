@@ -1,0 +1,516 @@
+import customtkinter as ctk
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import webbrowser
+import os
+import threading
+import re
+import extract_msg  # pip install extract-msg
+from PIL import Image, ImageFilter  # pip install Pillow
+from customtkinter import CTkImage  # Pour le scaling sur HighDPI
+
+# Import Selenium pour Edge
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+
+# Import pour l'automatisation Outlook via COM (nécessite pywin32)
+import win32com.client
+
+# Mot de passe requis
+PASSWORD_REQUIRED = "Alim7420"
+
+def extract_email(sender_str):
+    """Extrait l'adresse courriel depuis une chaîne (exemple : 'Nom <email@domaine.com>')."""
+    print(f"[DEBUG] Extraction de l'email depuis : {sender_str}")
+    if "<" in sender_str and ">" in sender_str:
+        email = sender_str.split("<")[1].split(">")[0].strip()
+        print(f"[DEBUG] Email extrait : {email}")
+        return email
+    m = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", sender_str)
+    email = m.group(0) if m else sender_str.strip()
+    print(f"[DEBUG] Email extrait (regex) : {email}")
+    return email
+
+def extract_domain(email_str):
+    """Renvoie la partie après le '@' dans une adresse courriel."""
+    if "@" in email_str:
+        domain = email_str.split("@")[1].strip()
+        print(f"[DEBUG] Domaine extrait : {domain}")
+        return domain
+    print(f"[DEBUG] Domaine extrait (pas de @) : {email_str.strip()}")
+    return email_str.strip()
+
+def extract_name(sender_str):
+    """Renvoie le nom de l'expéditeur (la partie avant '<') s'il existe."""
+    if "<" in sender_str:
+        name = sender_str.split("<")[0].strip()
+        print(f"[DEBUG] Nom extrait : {name}")
+        return name
+    print(f"[DEBUG] Nom extrait (entier) : {sender_str.strip()}")
+    return sender_str.strip()
+
+class LoginWindow(ctk.CTkToplevel):
+    def __init__(self, master, on_success, *args, **kwargs):
+        super().__init__(master, *args, **kwargs)
+        self.configure(bg=master.palette["bg_color"])
+        self.title("Connexion")
+        self.geometry("400x300")
+        self.on_success = on_success
+        self.protocol("WM_DELETE_WINDOW", self.master.destroy)
+
+        # Chargement du logo
+        try:
+            logo_image = Image.open("LOGO.png").convert("RGBA")
+            black_bg = Image.new("RGBA", logo_image.size, (0, 0, 0, 255))
+            logo_image = Image.alpha_composite(black_bg, logo_image)
+            logo_image = logo_image.resize((150, 150), Image.Resampling.LANCZOS)
+            self.logo = CTkImage(light_image=logo_image, size=(150, 150))
+            self.logo_label = ctk.CTkLabel(self, image=self.logo, text="", fg_color="transparent")
+            self.logo_label.pack(pady=(10, 5))
+            print("[DEBUG] Logo chargé et affiché sur la page de connexion.")
+        except Exception as e:
+            print(f"[DEBUG] Erreur lors du chargement du logo : {e}")
+
+        self.label = ctk.CTkLabel(self, text="Connexion", font=("Helvetica", 16),
+                                   text_color=master.palette["text_color"])
+        self.label.pack(pady=(5, 5))
+        
+        self.password_entry = ctk.CTkEntry(self, show="*", placeholder_text="Mot de passe")
+        self.password_entry.pack(pady=(5, 5))
+        
+        self.error_label = ctk.CTkLabel(self, text="", text_color="red", fg_color="transparent")
+        self.error_label.pack(pady=(5, 5))
+        
+        self.connect_button = ctk.CTkButton(self, text="Se connecter", command=self.check_password,
+                                            fg_color=master.palette["accent_color"], text_color="#000000")
+        self.connect_button.pack(pady=(5, 5))
+        
+    def check_password(self):
+        print(f"[DEBUG] Vérification du mot de passe saisi : {self.password_entry.get()}")
+        if self.password_entry.get() == PASSWORD_REQUIRED:
+            print("[DEBUG] Mot de passe correct. Fermeture de la fenêtre de connexion.")
+            self.destroy()
+            self.on_success()
+        else:
+            print("[DEBUG] Mot de passe incorrect.")
+            self.error_label.configure(text="Mot de passe incorrect.")
+
+class MainApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Organisateur de Courriels")
+        self.geometry("900x600")
+        # Définition des palettes pour dark et light
+        self.palettes = {
+            "dark": {
+                "bg_color": "#000000",
+                "accent_color": "#FFD700",
+                "secondary_color": "#1E90FF",  # Bleu pour le client actif
+                "text_color": "#FFFFFF",
+                "brown_color": "#8B4513"
+            },
+            "light": {
+                "bg_color": "#FFFFFF",
+                "accent_color": "#1E90FF",
+                "secondary_color": "#1E90FF",  # Bleu pour le client actif
+                "text_color": "#000000",
+                "brown_color": "#8B4513"
+            }
+        }
+        self.current_theme = "dark"
+        self.palette = self.palettes[self.current_theme]
+        ctk.set_appearance_mode(self.current_theme)
+        
+        self.emails_by_client = {}  # Dictionnaire regroupant les emails par domaine
+        self.current_client = None
+        self.current_font_size = 14
+
+        # Référence au driver Selenium (sera initialisé lors de l'ouverture du site)
+        self.driver = None
+
+        # Stockage du fichier .msg actuellement ouvert
+        self.current_msg_file = None
+        
+        self.create_widgets()
+        
+    def create_widgets(self):
+        print("[DEBUG] Création des widgets de l'interface principale.")
+        # En-tête de l'application
+        self.header_frame = ctk.CTkFrame(self, fg_color=self.palette["bg_color"])
+        self.header_frame.pack(fill="x", padx=10, pady=10)
+        
+        self.btn_folder = ctk.CTkButton(self.header_frame, text="Choisir Dossier", 
+                                        command=self.select_folder,
+                                        fg_color=self.palette["accent_color"], text_color="#000000")
+        self.btn_folder.grid(row=0, column=0, padx=5, pady=5)
+        
+        self.btn_files = ctk.CTkButton(self.header_frame, text="Choisir Courriels", 
+                                       command=self.select_files,
+                                       fg_color=self.palette["accent_color"], text_color="#000000")
+        self.btn_files.grid(row=0, column=1, padx=5, pady=5)
+        
+        self.btn_increase_font = ctk.CTkButton(self.header_frame, text="Agrandir", 
+                                               command=self.increase_font,
+                                               fg_color=self.palette["accent_color"], text_color="#000000")
+        self.btn_increase_font.grid(row=0, column=2, padx=5, pady=5)
+        
+        self.btn_decrease_font = ctk.CTkButton(self.header_frame, text="Réduire", 
+                                               command=self.decrease_font,
+                                               fg_color=self.palette["accent_color"], text_color="#000000")
+        self.btn_decrease_font.grid(row=0, column=3, padx=5, pady=5)
+        
+        # Switch pour changer le thème
+        self.theme_switch = ctk.CTkSwitch(self.header_frame, text="Dark Mode", command=self.toggle_theme)
+        self.theme_switch.select()  # Par défaut en mode dark
+        self.theme_switch.grid(row=0, column=4, padx=5, pady=5)
+        
+        # Bouton pour ouvrir le site via Selenium
+        self.link_button = ctk.CTkButton(self.header_frame, text="Ouvrir TT-Alimentation", 
+                                         command=self.open_site,
+                                         fg_color=self.palette["accent_color"], text_color="#000000")
+        self.link_button.grid(row=0, column=5, padx=5, pady=5)
+        
+        # Bouton pour joindre le fichier téléchargé (pièce jointe générée sur le site)
+        self.attach_button = ctk.CTkButton(self.header_frame, text="Joindre téléchargement", 
+                                           command=self.attach_downloaded_file,
+                                           fg_color=self.palette["accent_color"], text_color="#000000")
+        self.attach_button.grid(row=0, column=6, padx=5, pady=5)
+        
+        # Label de statut
+        self.status_label = ctk.CTkLabel(self.header_frame, text="Prêt", text_color=self.palette["text_color"])
+        self.status_label.grid(row=0, column=7, padx=5, pady=5)
+        
+        # Zone principale de l'application
+        self.main_frame = ctk.CTkFrame(self, fg_color=self.palette["bg_color"])
+        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Panneau gauche : liste des expéditeurs (groupés par domaine)
+        self.client_frame = ctk.CTkScrollableFrame(self.main_frame, fg_color=self.palette["bg_color"], width=250)
+        self.client_frame.pack(side="left", fill="y", padx=(0,10))
+        
+        self.client_label = ctk.CTkLabel(self.client_frame, text="Expéditeurs", font=("Helvetica", 16),
+                                         text_color=self.palette["text_color"])
+        self.client_label.pack(pady=5)
+        
+        # Panneau droit : tableau listant les courriels
+        self.email_frame = ctk.CTkFrame(self.main_frame, fg_color=self.palette["bg_color"])
+        self.email_frame.pack(side="left", fill="both", expand=True)
+        
+        style = ttk.Style(self.email_frame)
+        style.theme_use("clam")
+        style.configure("Treeview",
+                        background=self.palette["bg_color"],
+                        fieldbackground=self.palette["bg_color"],
+                        foreground=self.palette["text_color"],
+                        font=("Helvetica", self.current_font_size),
+                        rowheight=self.current_font_size + 10)
+        style.map("Treeview", background=[("selected", self.palette["secondary_color"])])
+        
+        # Configuration des colonnes du tableau : "N°", "Nom" et "Sujet"
+        self.email_tree = ttk.Treeview(self.email_frame, columns=("num", "name", "subject"), show="headings")
+        self.email_tree.heading("num", text="N°")
+        self.email_tree.heading("name", text="Nom")
+        self.email_tree.heading("subject", text="Sujet")
+        self.email_tree.column("num", width=5, anchor="center")
+        self.email_tree.column("name", width=150, anchor="w")
+        self.email_tree.column("subject", anchor="w")
+        self.email_tree.pack(fill="both", expand=True)
+        self.email_tree.bind("<Double-1>", self.on_email_double_click)
+        print("[DEBUG] Widgets créés avec succès.")
+        
+    def toggle_theme(self):
+        # Bascule entre mode dark et light
+        print("[DEBUG] Changement de thème demandé.")
+        if self.current_theme == "dark":
+            self.current_theme = "light"
+        else:
+            self.current_theme = "dark"
+        ctk.set_appearance_mode(self.current_theme)
+        self.palette = self.palettes[self.current_theme]
+        self.update_theme()
+        
+    def update_theme(self):
+        print("[DEBUG] Mise à jour des couleurs et du thème.")
+        self.configure(bg=self.palette["bg_color"])
+        self.header_frame.configure(fg_color=self.palette["bg_color"])
+        for widget in self.header_frame.winfo_children():
+            if isinstance(widget, ctk.CTkButton):
+                widget.configure(fg_color=self.palette["accent_color"], text_color="#000000")
+            elif isinstance(widget, ctk.CTkSwitch):
+                widget.configure(text="Dark Mode" if self.current_theme=="dark" else "Light Mode")
+            elif isinstance(widget, ctk.CTkLabel):
+                widget.configure(text_color=self.palette["text_color"])
+        self.main_frame.configure(fg_color=self.palette["bg_color"])
+        self.client_frame.configure(fg_color=self.palette["bg_color"])
+        self.client_label.configure(text_color=self.palette["text_color"])
+        self.email_frame.configure(fg_color=self.palette["bg_color"])
+        
+        style = ttk.Style(self.email_frame)
+        style.configure("Treeview",
+                        background=self.palette["bg_color"],
+                        fieldbackground=self.palette["bg_color"],
+                        foreground=self.palette["text_color"])
+        self.status_label.configure(text_color=self.palette["text_color"])
+        
+    def update_status(self, text):
+        print(f"[DEBUG] Mise à jour du statut : {text}")
+        self.status_label.configure(text=text)
+        
+    def update_progress(self, value, maximum):
+        percent = int((value / maximum) * 100)
+        self.status_label.configure(text=f"Chargement... {percent}%")
+        
+    def increase_font(self):
+        self.current_font_size += 2
+        style = ttk.Style(self.email_frame)
+        style.configure("Treeview", font=("Helvetica", self.current_font_size), rowheight=self.current_font_size + 10)
+        print(f"[DEBUG] Taille de police augmentée à {self.current_font_size}.")
+        
+    def decrease_font(self):
+        if self.current_font_size > 6:
+            self.current_font_size -= 2
+            style = ttk.Style(self.email_frame)
+            style.configure("Treeview", font=("Helvetica", self.current_font_size), rowheight=self.current_font_size + 10)
+            print(f"[DEBUG] Taille de police réduite à {self.current_font_size}.")
+            
+    def select_folder(self):
+        folder = filedialog.askdirectory(title="Sélectionner un dossier")
+        if folder:
+            print(f"[DEBUG] Dossier sélectionné : {folder}")
+            msg_files = []
+            for root_dir, dirs, files in os.walk(folder):
+                for file in files:
+                    if file.lower().endswith(".msg"):
+                        msg_files.append(os.path.join(root_dir, file))
+            print(f"[DEBUG] Nombre de fichiers .msg trouvés : {len(msg_files)}")
+            self.load_emails(msg_files)
+            
+    def select_files(self):
+        files = filedialog.askopenfilenames(title="Sélectionner des fichiers .msg", filetypes=[("MSG Files", "*.msg")])
+        if files:
+            print(f"[DEBUG] Fichiers sélectionnés : {files}")
+            self.load_emails(files)
+            
+    def load_emails(self, file_list):
+        if not file_list:
+            return
+        self.update_status("Chargement...")
+        total = len(file_list)
+        self.emails_by_client = {}
+        
+        def process_files():
+            print("[DEBUG] Début du traitement des fichiers .msg.")
+            for idx, file_path in enumerate(file_list, start=1):
+                try:
+                    msg = extract_msg.Message(file_path)
+                    sender = msg.sender or "Inconnu"
+                    sender_email = extract_email(sender)
+                    sender_domain = extract_domain(sender_email)
+                    sender_name = extract_name(sender)
+                    subject = msg.subject or os.path.splitext(os.path.basename(file_path))[0]
+                    body = msg.body or "Aucun contenu."
+                    email_info = {
+                        "subject": subject,
+                        "body": body,
+                        "file": file_path,
+                        "sender_name": sender_name,
+                        "sender_email": sender_email,
+                        "sender_domain": sender_domain,
+                    }
+                    if sender_domain not in self.emails_by_client:
+                        self.emails_by_client[sender_domain] = []
+                    self.emails_by_client[sender_domain].append(email_info)
+                    print(f"[DEBUG] Fichier traité : {file_path} | Domaine : {sender_domain}")
+                except Exception as e:
+                    print(f"[DEBUG] Erreur lors du traitement de {file_path}: {e}")
+                self.after(0, self.update_progress, idx, total)
+            print("[DEBUG] Fin du traitement des fichiers.")
+            self.after(0, self.update_status, "Terminé")
+            self.after(0, self.populate_clients)
+            
+        threading.Thread(target=process_files, daemon=True).start()
+        
+    def populate_clients(self):
+        print("[DEBUG] Population des clients dans le panneau gauche.")
+        # Supprimer les anciens boutons
+        for widget in self.client_frame.winfo_children():
+            if isinstance(widget, ctk.CTkButton):
+                widget.destroy()
+        # Créer un bouton pour chaque domaine
+        for domain in sorted(self.emails_by_client.keys()):
+            # Si ce domaine est le client sélectionné, on lui attribue une couleur différente
+            button_color = self.palette["secondary_color"] if domain == self.current_client else self.palette["accent_color"]
+            btn = ctk.CTkButton(self.client_frame, text=domain, 
+                                command=lambda d=domain: self.populate_emails(d),
+                                fg_color=button_color, text_color="#000000")
+            btn.pack(fill="x", pady=2, padx=5)
+            print(f"[DEBUG] Client ajouté : {domain}")
+        # Réinitialiser le contenu du tableau des emails
+        for item in self.email_tree.get_children():
+            self.email_tree.delete(item)
+            
+    def populate_emails(self, domain):
+        print(f"[DEBUG] Population des emails pour le domaine : {domain}")
+        # Mise à jour du client actif
+        self.current_client = domain
+        # Met à jour l'affichage des clients pour refléter la sélection
+        self.populate_clients()
+        # Réinitialisation du site via Selenium
+        if self.driver:
+            try:
+                clear_client_btn = self.driver.find_element(By.ID, "clearClient")
+                clear_client_btn.click()
+                print("[DEBUG] Bouton 'clearClient' cliqué.")
+                reset_btn = self.driver.find_element(By.ID, "resetButton")
+                reset_btn.click()
+                print("[DEBUG] Bouton 'resetButton' cliqué.")
+            except Exception as e:
+                print(f"[DEBUG] Erreur Selenium pour changer de client: {e}")
+        self.email_tree.delete(*self.email_tree.get_children())
+        emails = self.emails_by_client.get(domain, [])
+        for idx, email in enumerate(emails, start=1):
+            self.email_tree.insert("", "end", values=(idx, email["sender_name"], email["subject"]))
+            print(f"[DEBUG] Email ajouté à la liste : {email['subject']}")
+            
+    def on_email_double_click(self, event):
+        print("[DEBUG] Double-clic sur un email détecté.")
+        selected = self.email_tree.selection()
+        if selected:
+            # Réinitialisation du site via Selenium
+            if self.driver:
+                try:
+                    reset_btn = self.driver.find_element(By.ID, "resetButton")
+                    reset_btn.click()
+                    print("[DEBUG] Bouton 'resetButton' cliqué avant ouverture du courriel.")
+                    try:
+                        close_email_btn = self.driver.find_element(By.ID, "closeEmail")
+                        close_email_btn.click()
+                        print("[DEBUG] Bouton 'closeEmail' cliqué.")
+                    except Exception as ex:
+                        print("[DEBUG] Aucun bouton 'closeEmail' trouvé, utilisation de resetButton.")
+                except Exception as e:
+                    print(f"[DEBUG] Erreur Selenium lors du changement de courriel: {e}")
+            item = selected[0]
+            index = int(self.email_tree.item(item, "values")[0]) - 1
+            domain = self.current_client
+            emails = self.emails_by_client.get(domain, [])
+            if index < len(emails):
+                file_path = emails[index]["file"]
+                self.current_msg_file = file_path  # Stocke le chemin du .msg ouvert
+                print(f"[DEBUG] Email sélectionné : {file_path}")
+                try:
+                    if os.name == "nt":
+                        os.startfile(file_path)
+                    else:
+                        opener = "open" if os.uname().sysname == "Darwin" else "xdg-open"
+                        os.system(f'{opener} "{file_path}"')
+                    print("[DEBUG] Commande système lancée pour ouvrir le fichier .msg dans Outlook.")
+                except Exception as e:
+                    messagebox.showerror("Erreur", f"Impossible d'ouvrir le fichier : {e}")
+                    
+    def open_site(self):
+        """Ouvre le site via Selenium (Edge) et se connecte automatiquement."""
+        print("[DEBUG] Ouverture du site TT-Alimentation via Selenium.")
+        try:
+            self.driver = webdriver.Edge()
+            self.driver.implicitly_wait(10)
+            self.driver.get("https://audilemoon606.github.io/TT-Alimentation/")
+            print("[DEBUG] Site ouvert. Envoi du mot de passe...")
+            password_input = self.driver.find_element(By.ID, "password")
+            password_input.send_keys(PASSWORD_REQUIRED)
+            login_button = self.driver.find_element(By.ID, "loginButton")
+            login_button.click()
+            print("[DEBUG] Bouton 'loginButton' cliqué. Connexion réussie sur le site.")
+        except Exception as e:
+            messagebox.showerror("Erreur Selenium", f"Erreur lors de l'ouverture du site: {e}")
+            print(f"[DEBUG] Erreur lors de l'ouverture du site via Selenium : {e}")
+
+    def attach_downloaded_file(self):
+        """
+        Permet à l'utilisateur de sélectionner la pièce jointe téléchargée sur le site.
+        Procède ensuite à la mise à jour du fichier .msg.
+        """
+        print("[DEBUG] Lancement de la procédure de jointure du fichier téléchargé.")
+        if not self.current_msg_file:
+            messagebox.showwarning("Aucun courriel", "Aucun courriel n'est actuellement ouvert.")
+            print("[DEBUG] Aucun courriel ouvert (self.current_msg_file est vide).")
+            return
+        downloaded_file = filedialog.askopenfilename(title="Sélectionner la pièce téléchargée")
+        if downloaded_file:
+            print(f"[DEBUG] Fichier téléchargé sélectionné : {downloaded_file}")
+            self.handle_downloaded_file(self.current_msg_file, downloaded_file)
+            messagebox.showinfo("Pièce jointe ajoutée", "La pièce jointe a été ajoutée au courriel.")
+        else:
+            print("[DEBUG] Aucune pièce jointe sélectionnée.")
+
+    def handle_downloaded_file(self, msg_file_path, attachment_file_path):
+        """
+        Met à jour le fichier .msg en procédant ainsi :
+        1. Ferme le courriel ouvert dans Outlook.
+        2. Charge le courriel depuis le fichier .msg via Outlook.
+        3. Ajoute la nouvelle pièce jointe.
+        4. Sauvegarde le fichier .msg en écrasant l'ancien.
+        5. Rouvre le courriel dans Outlook.
+        """
+        print(f"[DEBUG] Début de la mise à jour du fichier .msg : {msg_file_path} avec la pièce jointe : {attachment_file_path}")
+        try:
+            # Initialiser Outlook via COM
+            outlook = win32com.client.Dispatch("Outlook.Application")
+            print("[DEBUG] Outlook initialisé via COM.")
+
+            # Fermer tous les inspecteurs (les fenêtres d'emails ouverts)
+            num_inspectors = outlook.Inspectors.Count
+            print(f"[DEBUG] Nombre d'inspecteurs ouverts avant fermeture : {num_inspectors}")
+            for inspector in outlook.Inspectors:
+                try:
+                    inspector.Close(1)  # 1 = fermeture sans sauvegarde
+                    print("[DEBUG] Un inspecteur fermé avec succès.")
+                except Exception as e:
+                    print(f"[DEBUG] Erreur lors de la fermeture d'un inspecteur : {e}")
+
+            # Charger le courriel depuis le fichier .msg en mode modification
+            print("[DEBUG] Chargement du courriel depuis le fichier .msg...")
+            try:
+                mail = outlook.OpenSharedItem(msg_file_path)
+            except Exception as e:
+                print(f"[DEBUG] OpenSharedItem non disponible : {e}. Utilisation de CreateItemFromTemplate.")
+                mail = outlook.CreateItemFromTemplate(msg_file_path)
+            if mail is None:
+                print("[DEBUG] Échec du chargement du courriel.")
+                return
+            print("[DEBUG] Courriel chargé avec succès.")
+
+            # Vérifier le nombre de pièces jointes avant ajout
+            count_before = mail.Attachments.Count
+            print(f"[DEBUG] Nombre de pièces jointes avant ajout : {count_before}")
+
+            # Ajouter la nouvelle pièce jointe
+            print("[DEBUG] Ajout de la pièce jointe au courriel...")
+            mail.Attachments.Add(attachment_file_path)
+            count_after = mail.Attachments.Count
+            print(f"[DEBUG] Nombre de pièces jointes après ajout : {count_after}")
+
+            if count_after > count_before:
+                print("[DEBUG] Pièce jointe ajoutée avec succès.")
+            else:
+                print("[DEBUG] La pièce jointe n'a PAS été ajoutée.")
+
+            # Sauvegarder le courriel en écrasant l'ancien fichier .msg
+            print("[DEBUG] Sauvegarde du courriel en écrasant l'ancien fichier .msg...")
+            mail.SaveAs(msg_file_path, 3)  # 3 correspond au format olMSG
+            print("[DEBUG] Courriel sauvegardé avec succès.")
+
+            # Rouvrir le courriel dans Outlook en mode modification
+            print("[DEBUG] Rouverte du courriel dans Outlook...")
+            mail.Display()
+            print("[DEBUG] Mise à jour terminée avec succès.")
+        except Exception as e:
+            print(f"[DEBUG] Erreur lors de la modification du fichier .msg : {e}")
+
+if __name__ == "__main__":
+    print("[DEBUG] Démarrage de l'application.")
+    app = MainApp()
+    login = LoginWindow(app, on_success=lambda: print("[DEBUG] Connexion réussie."))
+    app.wait_window(login)
+    print("[DEBUG] Lancement de la boucle principale de l'interface.")
+    app.mainloop()
